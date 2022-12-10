@@ -1,0 +1,1053 @@
+---
+title: "Coleta de dados - IPCA/IBGE"
+author: "Gustavo Jun Yakushiji^[Script baseado em João Pedro Simões Magro. Acesso em: https://github.com/JP-Magro/IAIABr]"
+date: "Última atualização em `r format(Sys.time(), '%d de %B de %Y')`"
+output:
+  html_document: default
+---
+
+<br> <br>
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE
+                      ,results = 'show'
+                      ,error=FALSE
+                      ,warning=FALSE
+                      ,message=FALSE
+                      , eval = FALSE)
+
+#-------------------------------------------------------------------------------
+
+# Bibliotecas
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(sidrar)
+```
+
+# Coleta IPCA (Julho de 2006 a setembro de 2022) {.unnumbered}
+
+<br> <br>
+
+# Dicionários
+
+## 2006 - 2011
+
+```{r Criando os dicionários - 2006-2011}
+
+#'*2006-2011*
+
+# Criando dicionário e frame base de itens.
+DICIO_2938 <- info_sidra(2938)
+DICIO_2938_IPCA_2k6_2k11 <- tibble(
+  "COD" = as.numeric(DICIO_2938[["classific_category"]][["c315 = Geral, grupo, subgrupo, item e subitem (465):"]][["cod"]]),
+  "DESC" = as.character(DICIO_2938[["classific_category"]][["c315 = Geral, grupo, subgrupo, item e subitem (465):"]][["desc"]])
+  )
+
+DICIO_2938_IPCA_2k6_2k11 <- DICIO_2938_IPCA_2k6_2k11 %>%
+  separate(DESC, c("COD_REF", "ITEM"), "\\.", fill="left") %>%
+  mutate(COD_REF = as.numeric(COD_REF)) %>%
+  mutate(COD_REF = if_else(COD == 7169.0, 0.0, COD_REF))
+
+# Selecionando apenas produtos alimentícios
+DICIO_2938_IPCA_2k6_2k11_ALM <- DICIO_2938_IPCA_2k6_2k11[1:180,]
+
+```
+
+## 2012 - 2019
+
+```{r Criando os dicionários - 2012-2019}
+
+#'*2012-2019*
+
+# Criando dicionário e frame base de itens.
+DICIO_1419 <- info_sidra(1419)
+DICIO_1419_IPCA_2K12_2K19 <- tibble(
+  "COD" = as.numeric(DICIO_1419[["classific_category"]][["c315 = Geral, grupo, subgrupo, item e subitem (464):"]][["cod"]]),
+  "DESC"=as.character(DICIO_1419[["classific_category"]][["c315 = Geral, grupo, subgrupo, item e subitem (464):"]][["desc"]]))
+
+DICIO_1419_IPCA_2K12_2K19 <- DICIO_1419_IPCA_2K12_2K19%>%
+   separate(DESC, c("COD_REF", "ITEM"), "\\.", fill = "left")%>%
+   mutate(COD_REF = as.numeric(COD_REF))%>%
+   mutate(COD_REF = if_else(COD == 7169.0, 0.0, COD_REF))
+
+# Selecionando apenas produtos alimentícios.
+DICIO_1419_IPCA_2K12_2K19_ALM <- DICIO_1419_IPCA_2K12_2K19[1:191,]
+
+
+```
+
+## 2020 - 2022
+
+```{r Criando os dicionários - 2020-2022}
+
+#'*2020 - 2022*
+
+#Criando dicionário e frame base de itens.
+DICIO_7060 <- info_sidra(7060)
+DICIO_7060_IPCA_2K20_2K21 <- tibble(
+  "COD" = as.numeric(DICIO_7060[["classific_category"]][["c315 = Geral, grupo, subgrupo, item e subitem (457):"]][["cod"]]),
+  "DESC" = as.character(DICIO_7060[["classific_category"]][["c315 = Geral, grupo, subgrupo, item e subitem (457):"]][["desc"]]))
+
+DICIO_7060_IPCA_2K20_2K21 <- DICIO_7060_IPCA_2K20_2K21%>%
+   separate(DESC, c("COD_REF", "ITEM"), "\\.", fill = "left")%>%
+   mutate(COD_REF = as.numeric(COD_REF))%>%
+   mutate(COD_REF = if_else(COD == 7169.0,0.0, COD_REF))
+
+#Selecionando apenas produtos alimentícios.
+DICIO_7060_IPCA_2K20_2K21_ALM <- DICIO_7060_IPCA_2K20_2K21[1:189,]
+
+
+```
+
+## Carregando e juntando todos os dicionários
+
+```{r juntando os dicionários}
+#'*Juntando todos os dicionários*
+
+DICIO_2938_1419 <- full_join(
+  DICIO_2938_IPCA_2k6_2k11_ALM, DICIO_1419_IPCA_2K12_2K19_ALM,
+  by=c("COD","COD_REF","ITEM"))
+
+DICIO_F_1_ALM <- full_join(
+  DICIO_2938_1419, DICIO_7060_IPCA_2K20_2K21_ALM,
+  by=c("COD","COD_REF","ITEM"))
+
+rm(DICIO_2938_1419,DICIO_2938_IPCA_2k6_2k11_ALM, DICIO_1419_IPCA_2K12_2K19_ALM, DICIO_7060_IPCA_2K20_2K21_ALM)
+
+```
+
+## Conferindo entradas repetidas
+
+```{r Conferindo entradas repetidas}
+#'*Conferindo entradas repetidas*
+
+DICIO_COD_REP <- DICIO_F_1_ALM%>%
+   group_by(COD)%>%
+   filter(n()>1)
+
+DICIO_COD_REF_REP <- DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(n()>1)
+
+DICIO_ITEM_REP <- DICIO_F_1_ALM%>%
+   group_by(ITEM)%>%
+   filter(n()>1)
+
+
+   #'*Número de indexadores repetidos*
+   REPETICAO <- tibble(
+      COD = nrow(DICIO_COD_REP),
+      COD_REF = nrow(DICIO_COD_REF_REP),
+      ITEM = nrow(DICIO_ITEM_REP)
+   )
+
+rm(DICIO_COD_REP,DICIO_COD_REF_REP,DICIO_ITEM_REP,REPETICAO)
+   
+```
+
+## Corrigindo entradas repetidas
+
+```{r Corrigindo entradas repetidas}
+   
+#'*Corrigindo entradas repetidas*
+
+# Os dados foram organizados mediante a coluna onde se observou a repetição e então, um a um os dados foram sendo substituiídos.
+
+   #Feijão carioca - Rajado
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM, c("carioca")))
+
+ITEM_CORR_BULK<-tibble(
+   COD = c(7180,12222),
+   COD_SUB = c(rep(12222,2)),
+   COD_REF = c(rep(1101073,2)),
+   COD_REF_SUB = c(rep(1101073,2)),
+   SUBSTITUTION = c(rep("Feijão - carioca (rajado)",2))
+)
+
+
+  #Feijão - macassar (fradinho)
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Feijão - macassar (fradinho)|Feijão - macáçar (fradinho)")))
+
+ITEM_CORR<-tibble(
+   COD=c(7177,47617),
+   COD_SUB=c(rep(47617,2)),
+   COD_REF=c(rep(1101053,2)),
+   COD_REF_SUB=c(rep(1101053,2)),
+   SUBSTITUTION=c(rep("Feijão - macassar (fradinho)",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+   #Batata baroa
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("batata|Batata|Mandioquinha")))
+
+ITEM_CORR<-tibble(
+   COD=c(7217,7218,12223),
+   COD_SUB=c(rep(12223,3)),
+   COD_REF=c(1103046,1103048,1103046),
+   COD_REF_SUB=c(rep(1103046,3)),
+   SUBSTITUTION=c(rep("Batata-Baroa",3))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+
+   #Balas
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("balas|Balas|Chicletes|chicletes|Chiclete|chiclete")))
+
+ITEM_CORR<-tibble(
+   COD=c(7223,12224),
+   COD_SUB=c(rep(12224,2)),
+   COD_REF=c(1104018,1104018),
+   COD_REF_SUB=c(rep(1104018,2)),
+   SUBSTITUTION=c(rep("Balas",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Chocolates
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Chocolate|chocolate|bombom|Bombom|Achocolatado")))
+
+  #Gelatina
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Gelatina|gelatina")))
+
+ITEM_CORR<-tibble(
+   COD=c(7227,107610),
+   COD_SUB=c(rep(107610,2)),
+   COD_REF=c(1104028,1104028),
+   COD_REF_SUB=c(rep(1104028,2)),
+   SUBSTITUTION=c(rep("Gelatina",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Lagarto
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Lagarto|lagarto")))
+
+ITEM_CORR<-tibble(
+   COD=c(7297,12294),
+   COD_SUB=c(rep(12294,2)),
+   COD_REF=c(1107091,1107091),
+   COD_REF_SUB=c(rep(1107091,2)),
+   SUBSTITUTION=c(rep("Lagarto comum",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Salsicha
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Salsicha|salsicha")))
+
+ITEM_CORR<-tibble(
+   COD=c(7338,12304
+         ,7409,107625),
+   COD_SUB=c(rep(12304,2),rep(107625,2)),
+   COD_REF=c(1109007,1109007
+             ,1115050,1115050),
+   COD_REF_SUB=c(rep(1109007,2),rep(1115050,2)),
+   SUBSTITUTION=c(rep("Salsicha",2),rep("Salsicha em conserva",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Salame
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Salame|salame")))
+
+ITEM_CORR<-tibble(
+   COD=c(7342,12305),
+   COD_SUB=c(rep(12305,2)),
+   COD_REF=c(1109012,1109012),
+   COD_REF_SUB=c(rep(1109012,2)),
+   SUBSTITUTION=c(rep("Salame",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Carne seca
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Carne seca|Carne-seca")))
+
+ITEM_CORR<-tibble(
+   COD=c(7346,12379),
+   COD_SUB=c(rep(12379,2)),
+   COD_REF=c(rep(1109056,2)),
+   COD_REF_SUB=c(rep(1109056,2)),
+   SUBSTITUTION=c(rep("Carne-seca e de Sol",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Hambúrger
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Carne de hambúrguer|Hambúrger")))
+
+ITEM_CORR<-tibble(
+   COD=c(7348,12380),
+   COD_SUB=c(rep(12380,2)),
+   COD_REF=c(rep(1109088,2)),
+   COD_REF_SUB=c(rep(1109088,2)),
+   SUBSTITUTION=c(rep("Hambúrger",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Frango
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Frango|frango")))
+
+ITEM_CORR<-tibble(
+   COD=c(7351,107617),
+   COD_SUB=c(rep(107617,2)),
+   COD_REF=c(rep(1110009,2)),
+   COD_REF_SUB=c(rep(1110009,2)),
+   SUBSTITUTION=c(rep("Frango inteiro",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Leite
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Leite|leite")))
+
+ITEM_CORR<-tibble(
+   COD=c(7357,12393),
+   COD_SUB=c(rep(12393,2)),
+   COD_REF=c(rep(1111004,2)),
+   COD_REF_SUB=c(rep(1111004,2)),
+   SUBSTITUTION=c(rep("Leite longa vida",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Iogurte
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Iogurte|iogurte|bebidas lácteas|leite|Leite")))
+
+  #Margarina
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Margarina|margarina")))
+
+ITEM_CORR<-tibble(
+   COD=c(7387,12395),
+   COD_SUB=c(rep(12395,2)),
+   COD_REF=c(rep(1113040,2)),
+   COD_REF_SUB=c(rep(1113040,2)),
+   SUBSTITUTION=c(rep("Margarina",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Açaí
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Açaí|açaí")))
+
+ITEM_CORR<-tibble(
+   COD=c(7391,12396),
+   COD_SUB=c(rep(12396,2)),
+   COD_REF=c(rep(1114004,2)),
+   COD_REF_SUB=c(rep(1114004,2)),
+   SUBSTITUTION=c(rep("Açaí (emulsão)",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Chá - Mate
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Mate|Chá")))
+
+ITEM_CORR<-tibble(
+   COD=c(7394,107620),
+   COD_SUB=c(rep(107620,2)),
+   COD_REF=c(rep(1114029,2)),
+   COD_REF_SUB=c(rep(1114029,2)),
+   SUBSTITUTION=c(rep("Chá",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Refrigerante Água mineral
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Refrigerante|Água|água")))
+
+  #Ervilha
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Ervilha")))
+
+ITEM_CORR<-tibble(
+   COD=c(7403,107622),
+   COD_SUB=c(rep(107622,2)),
+   COD_REF=c(rep(1115006,2)),
+   COD_REF_SUB=c(rep(1115006,2)),
+   SUBSTITUTION=c(rep("Ervilha em conserva",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Feijoada
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Feijoada")))
+
+ITEM_CORR<-tibble(
+   COD=c(7404,107623),
+   COD_SUB=c(rep(107623,2)),
+   COD_REF=c(rep(1115008,2)),
+   COD_REF_SUB=c(rep(1115008,2)),
+   SUBSTITUTION=c(rep("Feijoada em conserva",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Sardinha
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Sardinha|sardinha")))
+
+ITEM_CORR<-tibble(
+   COD=c(7408,107624),
+   COD_SUB=c(rep(107624,2)),
+   COD_REF=c(rep(1115039,2)),
+   COD_REF_SUB=c(rep(1115039,2)),
+   SUBSTITUTION=c(rep("Sardinha em conserva",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Carne de boi em conserva
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Carne|carne")))
+
+ITEM_CORR<-tibble(
+   COD=c(7410,107626),
+   COD_SUB=c(rep(107626,2)),
+   COD_REF=c(rep(1115051,2)),
+   COD_REF_SUB=c(rep(1115051,2)),
+   SUBSTITUTION=c(rep("Carne de boi em conserva",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Milho-verde
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Milho-verde|Milho")))
+
+ITEM_CORR<-tibble(
+   COD=c(7413,107628),
+   COD_SUB=c(rep(107628,2)),
+   COD_REF=c(rep(1115058,2)),
+   COD_REF_SUB=c(rep(1115058,2)),
+   SUBSTITUTION=c(rep("Milho-verde em conserva",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Atum
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Atum")))
+
+ITEM_CORR<-tibble(
+   COD=c(7414,107630),
+   COD_SUB=c(rep(107630,2)),
+   COD_REF=c(rep(1115075,2)),
+   COD_REF_SUB=c(rep(1115075,2)),
+   SUBSTITUTION=c(rep("Atum em conserva",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Atomatado
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Atomatado|Massa de tomate")))
+
+ITEM_CORR<-tibble(
+   COD=c(7417,109463),
+   COD_SUB=c(rep(109463,2)),
+   COD_REF=c(rep(1116005,2)),
+   COD_REF_SUB=c(rep(1116005,2)),
+   SUBSTITUTION=c(rep("Atomatado",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+  #Sal
+
+CONF<-DICIO_F_1_ALM%>%
+   group_by(COD_REF)%>%
+   filter(str_detect(ITEM,c("Sal")))
+
+ITEM_CORR<-tibble(
+   COD=c(7419,12397),
+   COD_SUB=c(rep(12397,2)),
+   COD_REF=c(rep(1116013,2)),
+   COD_REF_SUB=c(rep(1116013,2)),
+   SUBSTITUTION=c(rep("Sal",2))
+)
+
+ITEM_CORR_BULK<-bind_rows(ITEM_CORR_BULK,ITEM_CORR)
+
+
+#'*combinando os DF*
+DICIO_F_3_ALM<-full_join(DICIO_F_1_ALM,ITEM_CORR_BULK,by=c("COD","COD_REF"))
+
+
+```
+
+## Criando indexadores por Sub-grupo
+
+```{r Criando indexadores por sub-grupos}
+DICIO_F_3_ALM<-DICIO_F_3_ALM%>%
+   separate(COD_REF, into = c("COD_SUB_GRUPO", "COD_SUB_GRUPO_ITEM"), sep = 4, remove = FALSE)
+
+COD_REF_GRUPOS<-tibble(COD_REF=c(0,1,11,12,1101:1117,1201))
+
+COD_REF_GRUPOS<-left_join(COD_REF_GRUPOS,DICIO_F_3_ALM,by="COD_REF")
+
+COD_REF_GRUPOS<-COD_REF_GRUPOS%>%
+   select(COD_SUB_GRUPO,ITEM)%>%
+   mutate(NOME_SUB_GRUPO=ITEM,.keep="unused")
+
+DICIO_F_3_ALM<-left_join(COD_REF_GRUPOS,DICIO_F_3_ALM,by=c("COD_SUB_GRUPO"="COD_SUB_GRUPO"))
+
+
+
+DICIO_1K06_2K21_ALIM_F<-DICIO_F_3_ALM%>%
+   select(COD,COD_REF,ITEM,COD_SUB_GRUPO,NOME_SUB_GRUPO,COD_SUB,COD_REF_SUB,SUBSTITUTION)
+
+write_rds(DICIO_1K06_2K21_ALIM_F, "backup/DICIO_1K06_2K21_ALIM_F.rds")
+
+rm(CONF,DICIO_F_1_ALM,DICIO_F_3_ALM,ITEM_CORR,ITEM_CORR_BULK)
+
+```
+
+<br> <br>
+
+# Coleta dados
+
+<br>
+
+## Funções de acesso
+
+<br>
+
+```{r Funções de acesso}
+#'*Funções de acesso*
+
+PERIOD_GEN <- function(AI, AF, N_GEO){
+  anos <- as.character(rep(AI:AF, times = N_GEO, each = 12))
+  meses_0 <- str_pad(c(1:12), 2, pad = "0")
+  PERIOD <- paste0(anos, meses_0)
+  return(PERIOD)
+}
+
+COLETA<-function(PR, L, V, GE){
+  
+  IPCA_STA <- NULL
+  ni <- 0
+  
+  for(P in PR){
+    IPCA_UNS <- suppressMessages(get_sidra(x = L,
+                                           variable = V,
+                                           geo = GE,
+                                           geo.filter = NULL,
+                                           period = c(P),
+                                           digits = "max",
+                                           format = 3,
+                                           header = T))
+    IPCA_STA <- bind_rows(IPCA_STA,IPCA_UNS)
+    ni <- ni+1
+    if(ni < length(PR)){
+      cat("Downloading", ni, "of", length(PR), "tables", "\n")
+    }else{cat("Downloading the last table!", "\n")}
+  }
+  cat("Job is done!", "\n")
+  return(IPCA_STA)
+}
+
+```
+
+<br> <br>
+
+## Período de 2006 até 2011
+
+### Gerador de período de coleta 2006 até 2011
+
+```{r Gerador período - 2006-2011}
+PERIOD1 <- PERIOD_GEN(2006,2011,1)
+```
+
+### Coleta de dados - Brasil
+
+```{r ### Coleta de dados - Brasil - 2006-2011}
+IPCA_06_11_BR <- COLETA(PERIOD1, 2938, V = c(63, 69, 66), GE = c("Brazil"))
+saveRDS(IPCA_06_11_BR, "backup/IPCA_2K06_2K11_BRASIL_BRUTO.rds")
+```
+
+### Coleta de dados - Cidades
+
+```{r ### Coleta de dados - Cidades - 2006-2011}
+IPCA_06_11_CIDA <- COLETA(PERIOD1, 2938, V = c(63, 69, 66), GE = c("City"))
+saveRDS(IPCA_06_11_CIDA, "backup/IPCA_2K06_2K11_CIDADE_BRUTO.rds")
+```
+
+### Coleta de dados - Região metropolitana
+
+```{r ### Coleta de dados - Região metropolitana - 2006-2011}
+IPCA_06_11_METRO <- COLETA(PERIOD1, 2938, V = c(63, 69, 66), GE = c("MetroRegion"))
+saveRDS(IPCA_06_11_METRO, "backup/IPCA_2K06_2K11_METRO_BRUTO.rds")
+```
+
+### Juntando os três estratos e salvando o banco de dados
+
+```{r Bind final estratos geográficos SAVE - 2006-2011}
+IPCA_06_11_BR <- readRDS("backup/IPCA_2K06_2K11_BRASIL_BRUTO.rds")
+IPCA_06_11_CIDA <- readRDS("backup/IPCA_2K06_2K11_CIDADE_BRUTO.rds")
+IPCA_06_11_METRO <- readRDS("backup/IPCA_2K06_2K11_METRO_BRUTO.rds")
+
+
+colnames(IPCA_06_11_BR)<-c("NT_C","NT_D","UN","VALOR","COD_MUN","MUN","DATA_RAW","VAR","REF")
+colnames(IPCA_06_11_CIDA)<-c("NT_C","NT_D","UN","VALOR","COD_MUN","MUN","DATA_RAW","VAR","REF")
+colnames(IPCA_06_11_METRO)<-c("NT_C","NT_D","UN","VALOR","COD_MUN","MUN","DATA_RAW","VAR","REF")
+
+IPCA_06_11 <- bind_rows(IPCA_06_11_BR, IPCA_06_11_CIDA, IPCA_06_11_METRO)
+
+# Separando colunas com mais de uma informação.
+IPCA_2k6_2k11 <- IPCA_06_11%>%
+   separate(MUN, c("NOME_GEO","UF"), " - ")%>%
+   separate(DATA_RAW, c("MES","ANO"), " ")%>%
+   separate(VAR, c("INDICE","VAR"), " - ")%>%
+   separate(REF, c("COD_REF","ITEM"), "\\.", fill="left")%>%
+   mutate(COD_REF = as.numeric(COD_REF))%>%
+   mutate(COD_REF = if_else(ITEM == "Índice geral", 0.0, COD_REF))
+
+saveRDS(IPCA_2k6_2k11, "backup/IPCA_2k6_2k11_DATA_FINAL.rds")
+
+IPCA_2k6_2k11_DATA <- IPCA_2k6_2k11
+
+rm(IPCA_06_11, IPCA_06_11_BR, IPCA_06_11_CIDA, IPCA_06_11_METRO)
+```
+
+## Período de 2012 até 2019
+
+### Gerador de período de coleta 2012 até 2019
+
+```{r Gerador período - 2012-2019}
+PERIOD1 <- PERIOD_GEN(2012, 2019, 1)
+```
+
+### Coleta de dados - Brasil
+
+```{r}
+IPCA_12_19_BR <- COLETA(PERIOD1, 1419, V = c(63, 69, 66), GE = c("Brazil"))
+
+saveRDS(IPCA_12_19_BR, "backup/IPCA_2K12_2K19_BR_BRUTO.rds")
+
+IPCA_12_19_BR <- readRDS("backup/IPCA_2K12_2K19_BR_BRUTO.rds")
+
+colnames(IPCA_12_19_BR)<-c("NT_C","NT_D","UN","VALOR","COD_MUN","MUN","DATA_RAW","VAR","REF")
+```
+
+### Coleta de dados - Cidades
+
+```{r ### Coleta de dados - Cidades - 2012-2019}
+IPCA_12_19_CIDA <- COLETA(PERIOD1, 1419, V = c(63, 69, 66), GE = c("City"))
+
+saveRDS(IPCA_12_19_CIDA, "backup/IPCA_2K12_2K19_CIDADE_BRUTO.rds")
+
+IPCA_12_19_CIDA <- readRDS("backup/IPCA_2K12_2K19_CIDADE_BRUTO.rds")
+
+colnames(IPCA_12_19_CIDA) <- c("NT_C","NT_D","UN","VALOR","COD_MUN","MUN","DATA_RAW","VAR","REF")
+```
+
+### Coleta de dados - Região metropolitana
+
+```{r ### Coleta de dados - Região metropolitana - 2012-2019}
+IPCA_12_19_METRO <- COLETA(PERIOD1, 1419, V = c(63, 69, 66), GE = c("MetroRegion"))
+
+saveRDS(IPCA_12_19_METRO, "backup/IPCA_2K12_2K19_METRO_BRUTO.rds")
+
+IPCA_12_19_METRO <- readRDS("backup/IPCA_2K12_2K19_METRO_BRUTO.rds")
+
+colnames(IPCA_12_19_METRO) <- c("NT_C","NT_D","UN","VALOR","COD_MUN","MUN","DATA_RAW","VAR","REF")
+```
+
+### Juntando os três estratos e salvando o banco de dados
+
+```{r Bind final estratos geográficos SAVE - 2012-2019}
+IPCA_12_19 <- bind_rows(IPCA_12_19_BR,IPCA_12_19_CIDA,IPCA_12_19_METRO)
+
+#Separando colunas com mais de uma informação.
+IPCA_2k12_2k19 <- IPCA_12_19%>%
+   separate(MUN, c("NOME_GEO", "UF"), " - ")%>%
+   separate(DATA_RAW, c("MES", "ANO"), " ")%>%
+   separate(VAR, c("INDICE", "VAR"), " - ")%>%
+   separate(REF, c("COD_REF", "ITEM"), "\\.", fill = "left")%>%
+   mutate(COD_REF = as.numeric(COD_REF))%>%
+   mutate(COD_REF = if_else(ITEM == "Índice geral", 0.0, COD_REF))
+
+saveRDS(IPCA_2k12_2k19, "backup/IPCA_2k12_2k19_DATA_FINAL.rds")
+
+IPCA_2k12_2k19_DATA <- IPCA_2k12_2k19
+
+rm(IPCA_12_19_BR, IPCA_12_19_CIDA, IPCA_12_19_METRO, IPCA_12_19)
+
+```
+
+## Período de 2020 até 2022 (atual)
+
+### Gerador de período de coleta 2020 até 2022
+
+```{r Gerador período - 2020-2022}
+PERIOD1 <- PERIOD_GEN(2020,2022,1)
+```
+
+### Coleta de dados - Brasil
+
+```{r}
+IPCA_20_22_BR <- COLETA(PERIOD1, 7060, V = c(63, 69, 66), GE = c("Brazil"))
+
+saveRDS(IPCA_20_22_BR, "backup/IPCA_2K20_2K22_BR_BRUTO.rds")
+
+IPCA_20_22_BR <- readRDS("backup/IPCA_2K20_2K22_BR_BRUTO.rds")
+
+colnames(IPCA_20_22_BR)<-c("NT_C","NT_D","UN","VALOR"
+                              ,"COD_MUN","MUN","DATA_RAW","VAR","REF")
+```
+
+### Coleta de dados - Cidades
+
+```{r ### Coleta de dados - Cidades - 2020-2022}
+IPCA_20_22_CIDA <- COLETA(PERIOD1, 7060, V=c(63, 69, 66), GE = c("City"))
+
+saveRDS(IPCA_20_22_CIDA,"backup/IPCA_2K20_2K22_CIDADE_BRUTO.rds")
+
+IPCA_20_22_CIDA <- readRDS("backup/IPCA_2K20_2K22_CIDADE_BRUTO.rds")
+
+colnames(IPCA_20_22_CIDA)<-c("NT_C","NT_D","UN","VALOR"
+                              ,"COD_MUN","MUN","DATA_RAW","VAR","REF")
+```
+
+### Coleta de dados - Região metropolitana
+
+```{r ### Coleta de dados - Região metropolitana - 2020-2022}
+IPCA_20_22_METRO <- COLETA(PERIOD1, 7060, V = c(63, 69, 66), GE = c("MetroRegion"))
+
+saveRDS(IPCA_20_22_METRO, "backup/IPCA_2K20_2K22_METRO_BRUTO.rds")
+
+IPCA_20_22_METRO <- readRDS("backup/IPCA_2K20_2K22_METRO_BRUTO.rds")
+
+colnames(IPCA_20_22_METRO) <- c("NT_C","NT_D","UN","VALOR"
+                        ,"COD_MUN","MUN","DATA_RAW","VAR","REF")
+```
+
+### Juntando os TRÊS estratos e salvando o banco de dados
+
+```{r Bind final estratos geográficos SAVE - 2020-2022}
+IPCA_20_22 <- bind_rows(IPCA_20_22_BR, IPCA_20_22_CIDA, IPCA_20_22_METRO)
+
+#Separando colunas com mais de uma informação.
+IPCA_2k20_2k22 <- IPCA_20_22 %>%
+   separate(MUN, c("NOME_GEO", "UF"), " - ") %>%
+   separate(DATA_RAW, c("MES", "ANO"), " ") %>%
+   separate(VAR, c("INDICE","VAR"), " - ") %>%
+   separate(REF, c("COD_REF", "ITEM"), "\\.", fill = "left") %>%
+   mutate(COD_REF = as.numeric(COD_REF)) %>%
+   mutate(COD_REF = if_else(ITEM == "Índice geral", 0.0, COD_REF))
+
+saveRDS(IPCA_2k20_2k22, "backup/IPCA_2k20_2k22_DATA_FINAL.rds")
+
+IPCA_2k20_2k22_DATA <- IPCA_2k20_2k22
+
+rm(IPCA_20_22_BR, IPCA_20_22_CIDA, IPCA_20_22_METRO, IPCA_20_22)
+```
+
+## Juntando os dados das três pesquisas
+
+```{r Junção de todos os dados}
+IPCA_2k6_2k11_DATA <- readRDS("backup/IPCA_2k6_2k11_DATA_FINAL.rds")
+IPCA_2k12_2k19_DATA <- readRDS("backup/IPCA_2k12_2k19_DATA_FINAL.rds")
+IPCA_2k20_2k22_DATA <- readRDS("backup/IPCA_2k20_2k22_DATA_FINAL.rds")
+
+
+IPCA_1K06_2K22_DATA_LAST <- bind_rows(IPCA_2k6_2k11_DATA,
+                                      IPCA_2k12_2k19_DATA,
+                                      IPCA_2k20_2k22_DATA)
+
+#'*Checando se não há entradas repetidas*
+
+REP_TEST<-distinct(IPCA_1K06_2K22_DATA_LAST)
+rm(REP_TEST)
+
+```
+
+## Criando novos indexadores - Sub-grupos e Períodos
+
+```{r Criando Sub-Grupos e Períodos}
+
+#'*Criando os indexadores de Sub-grupos*
+IPCA_1K06_2K22_DATA_LAST_H_1 <- IPCA_1K06_2K22_DATA_LAST%>%
+   separate(COD_REF, into = c("COD_SUB_GRUPO", "COD_SUB_GRUPO_ITEM"), sep = 4, remove = FALSE)
+
+IPCA_1K06_2K22_DATA_LAST_H_2 <- left_join(IPCA_1K06_2K22_DATA_LAST_H_1,
+                                          DICIO_1K06_2K21_ALIM_F,
+                                          by=c("COD_REF","ITEM","COD_SUB_GRUPO"))
+
+IPCA_1K06_2K22_DATA_LAST_H_3 <- IPCA_1K06_2K22_DATA_LAST_H_2%>%
+   mutate(COD_REF = if_else(is.na(COD_REF_SUB) == TRUE, COD_REF, COD_REF_SUB))%>%
+   mutate(COD = if_else(is.na(COD_SUB) == TRUE, COD, COD_SUB))%>%
+   mutate(ITEM = if_else(is.na(SUBSTITUTION) == TRUE, ITEM, SUBSTITUTION))
+
+rm(IPCA_1K06_2K22_DATA_LAST_H_1, IPCA_1K06_2K22_DATA_LAST_H_2)
+
+#'*Criando os indexadores de Período*
+
+MESES <- tibble(
+  MES_PT = c("janeiro","fevereiro","março",
+             "abril","maio","junho",
+             "julho","agosto","setembro",
+             "outubro","novembro","dezembro"),
+  MES_INGLES = c("jan","feb","mar",
+                 "apr","may","jun"
+                 ,"jul","aug","sep",
+                 "oct","nov","dec"
+  ),
+  NUM_MES = c(1:12)
+)
+
+IPCA_1K06_2K22_DATA_LAST_H_4 <- left_join(IPCA_1K06_2K22_DATA_LAST_H_3,
+                                          MESES, 
+                                          by = c("MES" = "MES_PT"))
+
+IPCA_1K06_2K22_DATA_LAST_H_5 <- IPCA_1K06_2K22_DATA_LAST_H_4 %>%
+   mutate(DATE = paste(MES_INGLES, " ", "1", ANO)) %>%
+   mutate(DATE = mdy(DATE)) %>%
+   mutate(PERIODO=
+            factor(
+              case_when(
+
+as_date("2006-06-01")< DATE&DATE < as_date("2012-01-01")~"Jul 2006 - Dez 2011",
+as_date("2011-12-31")< DATE&DATE < as_date("2020-01-01")~"Jan 2012 - Dez 2019",
+as_date("2019-12-31")< DATE&DATE < as_date("2022-10-01")~"Jan 2020 - Set 2022",
+TRUE ~"PERDIDO NO TEMPO"),
+ordered = TRUE, levels = c("Jul 2006 - Dez 2011",
+                           "Jan 2012 - Dez 2019",
+                           "Jan 2020 - Set 2022")))
+
+IPCA_1K06_2K22_DATA_FINAL_H <- IPCA_1K06_2K22_DATA_LAST_H_5 %>%
+   select(COD,NT_C,NT_D,COD_MUN,NOME_GEO,UF,ANO,DATE,PERIODO
+          ,INDICE,VAR,COD_REF,COD_SUB_GRUPO,NOME_SUB_GRUPO
+          ,ITEM,UN,VALOR)
+
+saveRDS(IPCA_1K06_2K22_DATA_FINAL_H, "backup/IPCA_1K06_2K22_DATA_FINAL_H.rds")
+
+```
+
+## Adicionando as POFs vigentes a cada período
+
+### Dicionário das POFs de acordo com o período
+
+```{r}
+DICIO_POF <- data.frame(
+  PERIODO = c("Jul 2006 - Dez 2011",
+              "Jan 2012 - Dez 2019",
+              "Jan 2020 - Set 2022"),
+  POF = c("POF 2002-2003",
+          "POF 2008-2009",
+          "POF 2017-2018")
+)
+```
+
+### Juntando POF com o IPCA e corrigindo UF do Brasil
+
+```{r}
+IPCA_1K06_2K22_DATA_LAST_H_6 <- full_join(IPCA_1K06_2K22_DATA_FINAL_H,
+                                          DICIO_POF,
+                                          by = "PERIODO") %>% 
+  select(COD:PERIODO, POF, INDICE:VALOR) %>% 
+  mutate(PERIODO = as.ordered(PERIODO),
+         POF = as.ordered(POF)) %>% 
+  mutate(UF = case_when(
+    NOME_GEO == "Brasil" ~ "BR",
+    TRUE ~ as.character(UF)))
+
+write_rds(IPCA_1K06_2K22_DATA_LAST_H_6, "backup/IPCA_1K06_2K22_DATA_LAST_H_6.rds")
+
+```
+
+## Adicionando Cadeias e Nível de processamento
+
+### Dicionário
+
+```{r}
+# Importação
+DICIO_CADEIA_PROC <- read_excel("raw/DICIO_CADEIA_PROC.xlsx")
+```
+
+### Processamento e união dos frames
+
+```{r}
+# Corrigindo nomenclaturas
+IPCA_1K06_2K22_DATA_LAST_H_6 <- read_rds("backup/IPCA_1K06_2K22_DATA_LAST_H_6.rds")
+
+IPCA_2K06_2K22_CAD_PROC_1 <- left_join(IPCA_1K06_2K22_DATA_LAST_H_6,
+                                       DICIO_CADEIA_PROC,
+                                       by=c("COD_REF","COD_SUB_GRUPO","ITEM"))
+
+# Organizando dados finais
+IPCA_1K06_2K22_DATA_LAST_H_7 <- IPCA_2K06_2K22_CAD_PROC_1 %>% 
+  mutate(NIVEL_PROC = as.ordered(NIVEL_PROC)) %>% 
+  select(1:12, 19, 20, 13:18)
+
+```
+
+### Salvando banco de dados com cadeia e nível proc.
+
+```{r}
+write_rds(IPCA_1K06_2K22_DATA_LAST_H_7, "backup/IPCA_1K06_2K22_DATA_LAST_H_7.rds")
+
+rm(list=ls())
+
+IPCA_1K06_2K22_DATA_LAST_H_7 <- read_rds("backup/IPCA_1K06_2K22_DATA_LAST_H_7.rds")
+```
+
+## Adicionando ponderações POF
+
+```{r}
+# Dicionário ponderações
+POND_02_19_FINAL <- read_rds("raw/POND_02_19_FINAL.rds")
+
+## Selecionando e organizando a ponderada
+unique(POND_02_19_FINAL$PERIODO_POND)
+
+###Serão selecionadas as ponderações:
+###"Abr 2006" para POF02-03; "Jan 2009" para POF08-09; "Dez 2019" para POF18-19
+POND_02_19 <- POND_02_19_FINAL %>% 
+  filter(PERIODO_POND %in% c("Abr 2006", "Jan 2009", "Dez 2019")) %>% 
+  ungroup() %>% 
+  select(-PERIODO_POND, -PERIODO) %>% 
+  rename("ITEM" = SUBITEM,
+         "POND" = VAL_POND) %>% 
+  mutate(COD_REF = as.numeric(COD_REF))
+
+rm(POND_02_19_FINAL)
+```
+
+```{r}
+## Juntando IPCA com ponderação
+IPCA_1K06_2K22_DATA_LAST_H_7 <- read_rds("backup/IPCA_1K06_2K22_DATA_LAST_H_7.rds")
+
+  ## Verificando valores NA
+  verif <- IPCA_1K06_2K22_DATA_LAST_H_7 %>% 
+    filter(is.na(VALOR)) # tem cidades que terão NA para determinados produtos, pois varia de acordo com as POFS de cada local
+
+
+IPCA_1K06_2K22_DATA_LAST_H_8 <- IPCA_1K06_2K22_DATA_LAST_H_7 %>% 
+  drop_na(VALOR) %>% 
+  mutate(COD_SUB_GRUPO = as.numeric(COD_SUB_GRUPO))
+
+rm(verif, IPCA_1K06_2K22_DATA_LAST_H_7)
+
+
+  ### Juntando:
+IPCA_06_22_FINAL <- full_join(IPCA_1K06_2K22_DATA_LAST_H_8, POND_02_19, by = c("NOME_GEO", "POF", "COD_REF", "ITEM"))
+
+write_rds(IPCA_06_22_FINAL, "~/R program/_TCC/DATA/IPCA/IPCA_06_22_FINAL.rds")
+
+rm(IPCA_1K06_2K22_DATA_LAST_H_8, POND_02_19)
+
+IPCA_06_22_FINAL <- read_rds("~/R program/_TCC/DATA/IPCA/IPCA_06_22_FINAL.rds")
+```
+
+Código a baixo ignorado...
+
+```{r}
+#   ### Verificando NAs no "VALOR", após juntar --> Possuem POND, mas não VALOR
+#   verif <- IPCA_POND_07_21 %>% filter(is.na(VALOR))
+#   unique(verif$ITEM)
+# 
+# IPCA_POND_07_21 <- IPCA_POND_07_21 %>% drop_na(VALOR)
+# 
+# 
+#   ### Verificando NAs no "POND" --> Possui VALOR, mas não POND
+#   verif <- IPCA_POND_07_21 %>% filter(is.na(POND))
+#   unique(verif$ITEM)
+#                                       
+#   verif <- IPCA_POND_07_21 %>% filter(is.na(POND)) %>% group_by(UF, ANO, POF, INDICE, VAR, COD_SUB_GRUPO) %>% summarise(ITEM = unique(ITEM))
+# 
+# 
+# 
+# IPCA_POND_07_21_FINAL <- IPCA_POND_07_21 %>%
+#   drop_na(POND) %>% 
+#   mutate(POF = as.ordered(POF),
+#          PERIODO = factor(PERIODO, levels = c("Jul 2006 - Dez 2011",
+#                                               "Jan 2012 - Dez 2019",
+#                                               "Jan 2020 - Dez 2021"))) %>% 
+#   rename("DATA" = DATE,
+#          "COD_ITEM" = COD_SUB_GRUPO,
+#          "NOME_ITEM" = NOME_SUB_GRUPO,
+#          "SUBITEM" = ITEM)
+# 
+# 
+# rm(verif)
+# 
+# write_rds(IPCA_POND_07_21_FINAL, "DATA_FINAL/IPCA_POND_07_21_FINAL.rds")
+# 
+# IPCA_POND_07_21_FINAL<-read_rds("DATA_FINAL/IPCA_POND_07_21_FINAL.rds")
+
+```

@@ -1,0 +1,724 @@
+---
+title: "IPCA - Séries Temporais - ARIMA"
+author: "Gustavo Jun Yakushiji"
+date: "Última atualização em `r format(Sys.time(), '%d de %B de %Y')`"
+output:
+  html_document:
+    theme: paper
+    highlight: pygments
+    toc: TRUE
+    toc_float: TRUE
+    toc_depth: 4
+    number_sections: TRUE
+  pdf_document:
+    toc: TRUE
+    toc_depth: 4
+---
+
+```{r setup, include=TRUE, message=FALSE, warning=FALSE, comment=FALSE}
+knitr::opts_chunk$set(warning = FALSE,
+                      echo = TRUE,
+                      message = TRUE,
+                      comment = "",
+                      cache = TRUE,
+                      error = TRUE,
+                      fig.align = "center",
+                      fig.width = 12,
+                      fig.height = 5)
+
+# Bibliotecas----------------------------------------------------------
+library(tidyverse)
+library(lubridate)
+
+library(tsibble)
+library(fabletools)
+library(feasts)
+library(tseries)
+library(forecast)
+library(uroot)
+library(urca)
+```
+
+<br> <br>
+
+# Importação dos dados
+
+## IPCA Completo
+
+```{r}
+IPCA_06_22_COMPLETO <- read_rds("~/R program/_TCC/DATA/IPCA/IPCA_06_22_FINAL.rds")
+```
+
+# Manipulação de dados
+
+## Selecionando variáveis e observações de interesse
+
+```{r}
+IPCA_06_22_AL_DOM_BR <- IPCA_06_22_COMPLETO %>% 
+  filter(NOME_GEO == "Brasil",
+         VAR != "Peso mensal",
+         COD_SUB_GRUPO %in% c(0, 1, 11, 1101:1116),
+         ifelse(test = VAR == "Variação acumulada no ano", 
+                yes =  month(DATE) == month(12),
+                no = TRUE)) %>% 
+  drop_na(POND) %>%
+  select(NOME_GEO, ANO, DATE, PERIODO, POF, VAR, CADEIA, NIVEL_PROC, COD_REF, COD_SUB_GRUPO, NOME_SUB_GRUPO, ITEM, VALOR, POND)
+
+# write_rds(IPCA_06_22_AL_DOM_BR, "~/R program/_TCC/DATA/IPCA/IPCA_06_22_AL_DOM_BR.rds")
+```
+
+Excluiram-se as observações referentes ao peso mensal (`VAR != "Peso mensal"`); selecionou-se apenas os dados do Brasil (`NOME_GEO == "Brasil"`), do grupo Alimentação e Bebidas, subgrupo Alimentação no domicílio (`COD_SUB_GRUPO %in% c(0, 1, 11, 1101:1116)`); selecionou-se apenas as observações referentes ao mês de dezembro para a variável `Variação acumulada no ano`.
+
+`drop_na()`: retirando itens com ponderada NA (não possuem ponderada a nível nacional, apenas regional - não apresentaram significância o suficiente para fazer parte do nacional)
+
+## Variação mensal da inflação
+
+```{r}
+IPCA_06_22_AL_DOM_BR <- read_rds("~/R program/_TCC/DATA/IPCA/IPCA_06_22_AL_DOM_BR.rds")
+```
+
+```{r}
+IPCA_06_22_AL_DOM_BR_VARMES <- IPCA_06_22_AL_DOM_BR %>% 
+  filter(VAR == "Variação mensal",
+         CADEIA %in% c("Arroz", "Feijão", "Mandioca", "Tomate", "Banana", "Bovinocultura corte", "Bovinocultura leite")) %>% 
+  arrange(DATE, CADEIA) %>% 
+  drop_na(CADEIA) %>% 
+  mutate(VAL_POND = VALOR * POND) %>% 
+  group_by(DATE, CADEIA) %>% 
+  summarise(SOMA_VAL_POND = sum(VAL_POND),
+            SOMA_POND = sum(POND),
+            VAL_INFLA = SOMA_VAL_POND/SOMA_POND) %>% 
+  mutate(VALOR = round(VAL_INFLA, 4)) %>% 
+  mutate(CAT = case_when(
+    CADEIA %in% c("Bovinocultura corte", "Bovinocultura leite") ~ "Pecuária",
+    CADEIA %in% c("Arroz", "Feijão") ~ "Grãos",
+    CADEIA %in% c("Mandioca", "Tomate") ~ "Hortícolas",
+    CADEIA == "Banana" ~ "Frutas"
+  )) %>% 
+  ungroup() %>% 
+  select(DATE, CADEIA, CAT, VALOR)
+
+rm(IPCA_06_22_COMPLETO, IPCA_06_22_AL_DOM_BR)
+```
+
+`summarise(...)`: cálculo da inflação por cadeia (utilizando a ponderada das POFs).  
+
+# Análise exploratória
+
+## Converter banco de dados para `tsibble`
+
+```{r}
+IPCA_TS <- IPCA_06_22_AL_DOM_BR_VARMES %>% 
+  mutate(DATE = yearmonth(DATE)) %>%
+  as_tsibble(index = DATE, key = c(CADEIA, CAT))
+```
+
+<br>
+
+## Visualização dos dados
+
+```{r}
+cat <- unique(IPCA_TS$CAT)
+
+for(i in 1:length(cat)){
+
+  dados <- IPCA_06_22_AL_DOM_BR_VARMES %>%
+    filter(CAT == cat[i])
+
+  graf <- ggplot(data = dados,
+                 aes(x = DATE, y = VALOR))+
+    geom_line(size = 0.5)+
+    geom_hline(yintercept = 0, linetype = 2, color = "red")+
+    facet_wrap(~CADEIA, nrow = 2, scales = "free")+
+    scale_x_date(breaks = seq(as.Date("2006-07-01"),
+                              as.Date("2022-09-01"),
+                              by="1 year"),
+                 date_labels = "%Y")+
+    labs(title = "", x="", y = "Variação mensal da inflação (%)")+
+    theme_minimal()+
+    theme(strip.text.x = element_text(size = 15),
+          strip.text.y = element_text(size = 15),
+          axis.text.x = element_text(size = 13),
+          axis.text.y = element_text(size = 13),
+          title = element_text(size = 13),
+          plot.title = element_text(hjust = 0.5))
+
+  print(graf)
+}
+```
+
+<br>
+
+# Estacionariedade
+
+## Testes de raiz unitária
+
+Teste de raiz unitária (estacionariedade) a partir do teste de Dickey-Fuller Aumentado (Augmented Dickey-Fuller - ADF) - a partir da função `urca::ur.df()`.  
+
+<br>
+
+Dickey-Fuller Aumentado (ADF test):
+
+-   Ho = Presença de raíz unitária;
+
+-   HA = Ausência de raíz unitária.  
+
+Rejeita-se a hipótese nula caso p-valor < 0.05 (5% de nível de signif.) = série é estacionária.
+
+Comparar o `Value of test-statistic is: (ou t value)` com os valores críticos (`tau`). Se `t value` < $\tau$ (tau), rejeita-se a hipótese nula de presença de raiz unitária (ou seja, a série é estacionária = hipótese alternativa).  
+
+```{r}
+cat <- unique(IPCA_TS$CADEIA)
+
+for(i in 1:length(cat)){
+  dados <- IPCA_TS %>% 
+    filter(CADEIA == cat[i])
+  
+  DFA <- urca::ur.df(dados$VALOR, type = "trend", lags = 10, selectlags = "BIC") %>% summary()
+  
+  print(cat[i])
+  print(DFA)
+}
+```
+
+```{r}
+cat <- unique(IPCA_TS$CADEIA)
+
+for(i in 1:length(cat)){
+  dados <- IPCA_TS %>% 
+    filter(CADEIA == cat[i])
+  
+  DFA <- urca::ur.df(dados$VALOR, type = "drift", lags = 10, selectlags = "BIC") %>% summary()
+  
+  print(cat[i])
+  print(DFA)
+}
+```
+
+```{r}
+cat <- unique(IPCA_TS$CADEIA)
+
+for(i in 1:length(cat)){
+  dados <- IPCA_TS %>% 
+    filter(CADEIA == cat[i])
+  
+  DFA <- urca::ur.df(dados$VALOR, type = "none", lags = 10, selectlags = "BIC") %>% summary()
+  
+  print(cat[i])
+  print(DFA)
+}
+```
+
+
+<br>
+
+### Diferenciações
+
+```{r, eval=FALSE}
+# Número de diferenciações necessárias para tornar estacionária
+forecast::ndiffs()
+
+# Métodos para tornar série estacionária:
+## Diferenciação de 1ª ordem
+diff()
+
+## Diferenciação de 2ª ordem
+diff() %>% diff()
+
+# Diferenciação sazonal
+log() # Se não satisfaz, fazer...
+log() %>% diff() # Se não satisfaz, fazer...
+log() %>% diff() %>% diff()
+```
+
+<br>
+
+# Estimação dos modelos
+
+## Correlogramas
+
+Correlogramas das funções de autocorrelação (`acf`) e autocorrelação parcial (`pacf`).
+
+```{r}
+cat <- unique(IPCA_TS$CADEIA)
+
+for(i in 1:length(cat)){
+  dados <- IPCA_TS %>% 
+    filter(CADEIA == cat[i])
+  
+  grafACF <- forecast::ggAcf(dados$VALOR, calc.ci = T, level = 95)+
+    theme_minimal()+
+    labs(title = cat[i], x = "Defasagem", y = "FAC")+
+    theme_minimal()+
+    theme(strip.text.x = element_text(size = 15),
+          strip.text.y = element_text(size = 15),
+          axis.text.x = element_text(size = 13),
+          axis.text.y = element_text(size = 13),
+          title = element_text(size = 13))
+  
+  
+  grafPACF <- forecast::ggPacf(dados$VALOR)+
+    theme_minimal()+
+    labs(title = "", x = "Defasagem", y = "FACP")+
+    theme_minimal()+
+    theme(strip.text.x = element_text(size = 15),
+          strip.text.y = element_text(size = 15),
+          axis.text.x = element_text(size = 13),
+          axis.text.y = element_text(size = 13))
+  
+  library(patchwork)
+  gg <- grafACF + grafPACF
+  
+  print(gg)
+}
+```
+
+<br> <br>
+
+## Modelagem
+
+```{r}
+# Arroz ----
+FIT_ARROZ <- IPCA_TS %>% 
+  filter(CADEIA == "Arroz") %>% 
+  select(VALOR) %>% 
+  forecast::auto.arima(stationary = TRUE,
+                       seasonal = F,
+                       trace = TRUE,
+                       stepwise=FALSE,
+                       approximation=FALSE)
+
+FIT_ARROZ
+
+
+# Banana ----
+FIT_BANANA <- IPCA_TS %>% 
+  filter(CADEIA == "Banana") %>% 
+  select(VALOR) %>% 
+  forecast::auto.arima(stationary = TRUE,
+                       seasonal = F,
+                       trace = TRUE,
+                       stepwise=FALSE,
+                       approximation=FALSE)
+
+FIT_BANANA
+
+
+# Bovinocultura corte ----
+FIT_BOVINOS <- IPCA_TS %>% 
+  filter(CADEIA == "Bovinocultura corte") %>% 
+  select(VALOR) %>% 
+  forecast::auto.arima(stationary = TRUE,
+                       seasonal = F,
+                       trace = TRUE,
+                       stepwise=FALSE,
+                       approximation=FALSE)
+
+FIT_BOVINOS
+
+
+# Bovinocultura leite ----
+FIT_LEITE <- IPCA_TS %>% 
+  filter(CADEIA == "Bovinocultura leite") %>% 
+  select(VALOR) %>% 
+  forecast::auto.arima(stationary = TRUE,
+                       seasonal = F,
+                       trace = TRUE,
+                       stepwise=FALSE,
+                       approximation=FALSE)
+
+FIT_LEITE
+
+
+# Feijão ----
+FIT_FEIJAO <- IPCA_TS %>% 
+  filter(CADEIA == "Feijão") %>% 
+  select(VALOR) %>% 
+  forecast::auto.arima(stationary = TRUE,
+                       seasonal = F,
+                       trace = TRUE,
+                       stepwise=FALSE,
+                       approximation=FALSE)
+
+FIT_FEIJAO
+
+
+# Mandioca ----
+FIT_MANDIOCA <- IPCA_TS %>% 
+  filter(CADEIA == "Mandioca") %>% 
+  select(VALOR) %>% 
+  forecast::auto.arima(stationary = TRUE,
+                       seasonal = F,
+                       trace = TRUE,
+                       stepwise=FALSE,
+                       approximation=FALSE)
+
+FIT_MANDIOCA
+
+
+# Tomate ----
+FIT_TOMATE <- IPCA_TS %>% 
+  filter(CADEIA == "Tomate") %>% 
+  select(VALOR) %>% 
+  forecast::auto.arima(stationary = TRUE,
+                       seasonal = F,
+                       trace = TRUE,
+                       stepwise=FALSE,
+                       approximation=FALSE)
+
+FIT_TOMATE
+```
+
+
+<br>
+
+# Diagnóstico do modelo
+
+## Visualização dos resíduos do modelo
+
+```{r}
+cat <- unique(IPCA_TS$CADEIA)
+
+fit_cad <- list(FIT_ARROZ, FIT_BANANA, FIT_BOVINOS, FIT_MANDIOCA, FIT_FEIJAO, FIT_LEITE, FIT_TOMATE)
+
+for(i in 1:length(fit_cad)){
+  dados <-
+  ggAcf(fit_cad[[i]]$residuals)+
+  labs(title = cat[i], x = "Defasagem", y = "FAC")+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15))
+
+  print(dados)
+}
+```
+
+## Teste de autocorrelação (Ljung Box)
+
+Ljung Box - Hipóteses (<https://www.statology.org/ljung-box-test/>):  
+
+-   Ho = Resíduos são independentes;  
+
+-   HA = Resíduos não são distribuídos de maneira independente; exibem correlação serial.  
+
+Para p-valor maior que 0,05, não se rejeita a hipótese nula, ou seja, os resíduos são independentes (desejável).  
+
+```{r}
+cat <- unique(IPCA_TS$CADEIA)
+
+fit_cad <- list(FIT_ARROZ, FIT_BANANA, FIT_BOVINOS, FIT_LEITE, FIT_FEIJAO, FIT_MANDIOCA, FIT_TOMATE)
+
+for(i in 1:length(fit_cad)){
+  dados <- stats::Box.test(fit_cad[[i]]$residuals, type = "Ljung-Box")
+
+  print(cat[i])
+  print(dados)
+}
+```
+
+
+# Ajuste dos modelos
+
+```{r}
+DATE = unique(IPCA_06_22_AL_DOM_BR_VARMES$DATE)
+
+# Arroz ----
+MOD_ARROZ <- data.frame(
+  DATE,
+  Observado = FIT_ARROZ[["x"]],
+  Modelo = FIT_ARROZ[["fitted"]]
+) %>% 
+  pivot_longer(cols = c(Observado, Modelo), names_to = "VAR", values_to = "VALOR")
+
+MOD_ARROZ %>% 
+  ggplot(aes(x = DATE, y = VALOR, color = VAR, group = VAR)) +
+  geom_line(size = 1.05)+
+  scale_x_date(breaks = seq(as.Date("2006-07-01"),
+                            as.Date("2022-09-01"),
+                            by="6 month"),
+               date_labels = "%b-%Y")+
+  labs(title = "Arroz", color = "", x = "", y = "Variação mensal da inflação (%)")+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13, angle = 90),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15),
+        legend.text = element_text(size = 13))
+
+
+# Banana ----
+MOD_BANANA <- data.frame(
+  DATE,
+  Observado = FIT_BANANA[["x"]],
+  Modelo = FIT_BANANA[["fitted"]]
+) %>% 
+  pivot_longer(cols = c(Observado, Modelo), names_to = "VAR", values_to = "VALOR")
+
+MOD_BANANA %>% 
+  ggplot(aes(x = DATE, y = VALOR, color = VAR, group = VAR)) +
+  geom_line(size = 1.05)+
+  scale_x_date(breaks = seq(as.Date("2006-07-01"),
+                            as.Date("2022-09-01"),
+                            by="6 month"),
+               date_labels = "%b-%Y")+
+  labs(title = "Banana", color = "", x = "", y = "Variação mensal da inflação (%)")+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13, angle = 90),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15),
+        legend.text = element_text(size = 13))
+
+
+# Bovinocultura corte ----
+MOD_BOVINOS <- data.frame(
+  DATE,
+  Observado = FIT_BOVINOS[["x"]],
+  Modelo = FIT_BOVINOS[["fitted"]]
+) %>% 
+  pivot_longer(cols = c(Observado, Modelo), names_to = "VAR", values_to = "VALOR")
+
+MOD_BOVINOS %>% 
+  ggplot(aes(x = DATE, y = VALOR, color = VAR, group = VAR)) +
+  geom_line(size = 1.05)+
+  scale_x_date(breaks = seq(as.Date("2006-07-01"),
+                            as.Date("2022-09-01"),
+                            by="6 month"),
+               date_labels = "%b-%Y")+
+  labs(title = "Bovinocultura corte", color = "", x = "", y = "Variação mensal da inflação (%)")+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13, angle = 90),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15),
+        legend.text = element_text(size = 13))
+
+# Bovinocultura leite ----
+MOD_LEITE <- data.frame(
+  DATE,
+  Observado = FIT_LEITE[["x"]],
+  Modelo = FIT_LEITE[["fitted"]]
+) %>% 
+  pivot_longer(cols = c(Observado, Modelo), names_to = "VAR", values_to = "VALOR")
+
+MOD_LEITE %>% 
+  ggplot(aes(x = DATE, y = VALOR, color = VAR, group = VAR)) +
+  geom_line(size = 1.05)+
+  scale_x_date(breaks = seq(as.Date("2006-07-01"),
+                            as.Date("2022-09-01"),
+                            by="6 month"),
+               date_labels = "%b-%Y")+
+  labs(title = "Bovinocultura leite", color = "", x = "", y = "Variação mensal da inflação (%)")+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13, angle = 90),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15),
+        legend.text = element_text(size = 13))
+
+
+# Feijão ----
+MOD_FEIJAO <- data.frame(
+  DATE,
+  Observado = FIT_FEIJAO[["x"]],
+  Modelo = FIT_FEIJAO[["fitted"]]
+) %>% 
+  pivot_longer(cols = c(Observado, Modelo), names_to = "VAR", values_to = "VALOR")
+
+MOD_FEIJAO %>% 
+  ggplot(aes(x = DATE, y = VALOR, color = VAR, group = VAR)) +
+  geom_line(size = 1.05)+
+  scale_x_date(breaks = seq(as.Date("2006-07-01"),
+                            as.Date("2022-09-01"),
+                            by="6 month"),
+               date_labels = "%b-%Y")+
+  labs(title = "Feijão", color = "", x = "", y = "Variação mensal da inflação (%)")+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13, angle = 90),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15),
+        legend.text = element_text(size = 13))
+
+# Mandioca ----
+MOD_MANDIOCA <- data.frame(
+  DATE,
+  Observado = FIT_MANDIOCA[["x"]],
+  Modelo = FIT_MANDIOCA[["fitted"]]
+) %>% 
+  pivot_longer(cols = c(Observado, Modelo), names_to = "VAR", values_to = "VALOR")
+
+MOD_MANDIOCA %>% 
+  ggplot(aes(x = DATE, y = VALOR, color = VAR, group = VAR)) +
+  geom_line(size = 1.05)+
+  scale_x_date(breaks = seq(as.Date("2006-07-01"),
+                            as.Date("2022-09-01"),
+                            by="6 month"),
+               date_labels = "%b-%Y")+
+  labs(title = "Mandioca", color = "", x = "", y = "Variação mensal da inflação (%)")+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13, angle = 90),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15),
+        legend.text = element_text(size = 13))
+
+# Tomate ----
+MOD_TOMATE <- data.frame(
+  DATE,
+  Observado = FIT_TOMATE[["x"]],
+  Modelo = FIT_TOMATE[["fitted"]]
+) %>% 
+  pivot_longer(cols = c(Observado, Modelo), names_to = "VAR", values_to = "VALOR")
+
+MOD_TOMATE %>% 
+  ggplot(aes(x = DATE, y = VALOR, color = VAR, group = VAR)) +
+  geom_line(size = 1.05)+
+  scale_x_date(breaks = seq(as.Date("2006-07-01"),
+                            as.Date("2022-09-01"),
+                            by="6 month"),
+               date_labels = "%b-%Y")+
+  labs(title = "Tomate", color = "", x = "", y = "Variação mensal da inflação (%)")+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13, angle = 90),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15),
+        legend.text = element_text(size = 13))
+```
+
+# Acurácia
+
+```{r}
+cat <- unique(IPCA_TS$CADEIA)
+
+fit_cad <- list(FIT_ARROZ, FIT_BANANA, FIT_BOVINOS, FIT_LEITE, FIT_FEIJAO, FIT_MANDIOCA, FIT_TOMATE)
+
+for(i in 1:length(fit_cad)){
+  dados <- accuracy(fit_cad[[i]])
+
+  print(cat[i])
+  print(dados)
+}
+```
+
+
+# Previsão
+
+```{r}
+# https://www.rdocumentation.org/packages/forecast/versions/8.4/topics/forecast
+
+# Arroz ----
+FIT_ARROZ %>% 
+  forecast::forecast(h = 6) %>% knitr::kable()
+  autoplot()+
+  geom_hline(yintercept = 0, color = "red", linetype = 2)+
+  scale_x_continuous(breaks = seq(2006, 2023, by = 1))+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15))+
+  labs(title = "Arroz", x = "", y = "Variação mensal da inflação (%)")
+
+# Banana ----
+FIT_BANANA %>% 
+  forecast::forecast(h = 6) %>% knitr::kable()
+  autoplot()+
+  geom_hline(yintercept = 0, color = "red", linetype = 2)+
+  scale_x_continuous(breaks = seq(2006, 2023, by = 1))+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15))+
+  labs(title = "Banana", x = "", y = "Variação mensal da inflação (%)")
+
+# Bovinocultura corte ----
+FIT_BOVINOS %>% 
+  forecast::forecast(h = 6) %>% knitr::kable()
+  autoplot()+
+  geom_hline(yintercept = 0, color = "red", linetype = 2)+
+  scale_x_continuous(breaks = seq(2006, 2023, by = 1))+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15))+
+  labs(title = "Bovinocultura corte", x = "", y = "Variação mensal da inflação (%)")
+
+
+# Bovinocultura leite ----
+FIT_LEITE %>% 
+  forecast::forecast(h = 6) %>% knitr::kable()
+  autoplot()+
+  geom_hline(yintercept = 0, color = "red", linetype = 2)+
+  scale_x_continuous(breaks = seq(2006, 2023, by = 1))+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15))+
+  labs(title = "Bovinocultura leite", x = "", y = "Variação mensal da inflação (%)")
+
+
+# Feijão ----
+FIT_FEIJAO %>% 
+  forecast::forecast(h = 6) %>% knitr::kable()
+  autoplot()+
+  geom_hline(yintercept = 0, color = "red", linetype = 2)+
+  scale_x_continuous(breaks = seq(2006, 2023, by = 1))+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15))+
+  labs(title = "Feijão", x = "", y = "Variação mensal da inflação (%)")
+
+
+# Mandioca ----
+FIT_MANDIOCA %>% 
+  forecast::forecast(h = 6) %>% knitr::kable()
+  autoplot()+
+  geom_hline(yintercept = 0, color = "red", linetype = 2)+
+  scale_x_continuous(breaks = seq(2006, 2023, by = 1))+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15))+
+  labs(title = "Mandioca", x = "", y = "Variação mensal da inflação (%)")
+
+# Tomate ----
+FIT_TOMATE %>% 
+  forecast::forecast(h = 6) %>% knitr::kable()
+  autoplot()+
+  geom_hline(yintercept = 0, color = "red", linetype = 2)+
+  scale_x_continuous(breaks = seq(2006, 2023, by = 1))+
+  theme_minimal()+
+  theme(strip.text.x = element_text(size = 15),
+        strip.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 13),
+        axis.text.y = element_text(size = 13),
+        title = element_text(size = 15))+
+  labs(title = "Tomate", x = "", y = "Variação mensal da inflação (%)")
+
+```
+
+<br> <br>
