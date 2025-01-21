@@ -46,7 +46,7 @@ library(urca)
 ## IPCA Completo
 
 ```{r}
-IPCA_06_22_COMPLETO <- read_rds("~/R program/_TCC/DATA/IPCA/IPCA_06_22_FINAL.rds")
+IPCA_06_22_COMPLETO <- read_rds("~/R program/TCC/DATA/IPCA/IPCA_06_22_FINAL.rds")
 ```
 
 # Manipulação de dados
@@ -74,13 +74,13 @@ Excluiram-se as observações referentes ao peso mensal (`VAR != "Peso mensal"`)
 ## Variação mensal da inflação
 
 ```{r}
-IPCA_06_22_AL_DOM_BR <- read_rds("~/R program/_TCC/DATA/IPCA/IPCA_06_22_AL_DOM_BR.rds")
+IPCA_06_22_AL_DOM_BR <- read_rds("~/R program/TCC/DATA/IPCA/IPCA_06_22_AL_DOM_BR.rds")
 ```
 
 ```{r}
 IPCA_06_22_AL_DOM_BR_VARMES <- IPCA_06_22_AL_DOM_BR %>% 
   filter(VAR == "Variação mensal",
-         CADEIA %in% c("Arroz", "Feijão", "Mandioca", "Tomate", "Banana", "Bovinocultura corte", "Bovinocultura leite")) %>% 
+         CADEIA %in% c("Arroz", "Feijão", "Mandioca", "Banana", "Bovinocultura corte", "Bovinocultura leite")) %>% 
   arrange(DATE, CADEIA) %>% 
   drop_na(CADEIA) %>% 
   mutate(VAL_POND = VALOR * POND) %>% 
